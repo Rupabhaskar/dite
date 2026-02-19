@@ -33,6 +33,42 @@ type GridDay = {
   levelClass: string;
 };
 
+const NUTRITION_CACHE_KEY = "protein200_nutrition_rows";
+
+type NutritionRowData = { id: string; food: string; calories: string; protein: string; fiber: string };
+
+const DEFAULT_NUTRITION_ROWS: Omit<NutritionRowData, "id">[] = [
+  { food: "Chicken (150 g)", calories: "250 kcal", protein: "46 g", fiber: "0 g" },
+  { food: "Rice (50 g cooked)", calories: "65 kcal", protein: "1.3 g", fiber: "0.2 g" },
+  { food: "Eggs (4)", calories: "280 kcal", protein: "24 g", fiber: "0 g" },
+  { food: "Dosa (1)", calories: "120 kcal", protein: "3 g", fiber: "1 g" },
+  { food: "Roti (3)", calories: "300 kcal", protein: "9 g", fiber: "6 g" },
+  { food: "Groundnuts (50 g)", calories: "285 kcal", protein: "13 g", fiber: "4 g" },
+  { food: "Soya Chunks (60 g)", calories: "≈ 205 kcal", protein: "≈ 31–32 g", fiber: "≈ 7–8 g" },
+  { food: "Vegetables (ridge gourd 200 g)", calories: "34 kcal", protein: "1.6 g", fiber: "3 g" },
+];
+
+function getStoredNutritionRows(): NutritionRowData[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(NUTRITION_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function setStoredNutritionRows(rows: NutritionRowData[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(NUTRITION_CACHE_KEY, JSON.stringify(rows));
+  } catch {
+    // ignore
+  }
+}
+
 function buildGridDays(data: ProteinData): GridDay[] {
   const sortedDates = Object.keys(data).sort();
   const firstDate = sortedDates[0];
@@ -151,6 +187,11 @@ export default function ProteinChallenge() {
         <p className="text-[var(--color-text-muted)] text-[0.95rem] mt-1.5">
           Track your daily protein • Multiple entries per day
         </p>
+        <div className="mt-4 px-4 py-3 rounded-xl bg-[var(--color-bg-input)] border border-[var(--color-border)] text-left max-w-xl mx-auto">
+          <p className="text-[var(--color-text)] text-sm font-medium">
+            Stay consistent. Protein keeps you full, preserves muscle, and supports weight loss. One day at a time.
+          </p>
+        </div>
       </header>
 
       <section className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-2xl p-6 mb-6 shadow-sm">
@@ -240,32 +281,7 @@ export default function ProteinChallenge() {
         </div>
       </section>
 
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold mb-4 text-[var(--color-text)]">
-          Nutrition reference
-        </h2>
-        <div className="overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] shadow-sm">
-          <table className="w-full min-w-[320px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-input)]">
-                <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Food</th>
-                <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Calories</th>
-                <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Protein</th>
-                <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Fiber</th>
-              </tr>
-            </thead>
-            <tbody>
-              <NutritionRow food="Chicken (150 g)" calories="250 kcal" protein="46 g" fiber="0 g" />
-              <NutritionRow food="Rice (50 g cooked)" calories="65 kcal" protein="1.3 g" fiber="0.2 g" />
-              <NutritionRow food="Eggs (4)" calories="280 kcal" protein="24 g" fiber="0 g" />
-              <NutritionRow food="Dosa (1)" calories="120 kcal" protein="3 g" fiber="1 g" />
-              <NutritionRow food="Roti (3)" calories="300 kcal" protein="9 g" fiber="6 g" />
-              <NutritionRow food="Groundnuts (50 g)" calories="285 kcal" protein="13 g" fiber="4 g" />
-              <NutritionRow food="Vegetables (ridge gourd 200 g)" calories="34 kcal" protein="1.6 g" fiber="3 g" />
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <EditableNutritionTable />
 
       <div
         className="fixed pointer-events-none z-[100] rounded-lg px-3 py-2 text-sm bg-[var(--color-bg-card)] border border-[var(--color-border)] shadow-xl transition-opacity"
@@ -290,16 +306,145 @@ function LegendItem({ color, label }: { color: string; label: string }) {
   );
 }
 
+function EditableNutritionTable() {
+  const [customRows, setCustomRows] = useState<NutritionRowData[]>([]);
+
+  useEffect(() => {
+    setCustomRows(getStoredNutritionRows());
+  }, []);
+
+  const addRow = useCallback((row: Omit<NutritionRowData, "id">) => {
+    const newRow: NutritionRowData = {
+      ...row,
+      id: "n-" + Date.now(),
+    };
+    setCustomRows((prev) => {
+      const next = [...prev, newRow];
+      setStoredNutritionRows(next);
+      return next;
+    });
+  }, []);
+
+  const removeRow = useCallback((id: string) => {
+    setCustomRows((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      setStoredNutritionRows(next);
+      return next;
+    });
+  }, []);
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-lg font-semibold mb-4 text-[var(--color-text)]">
+        Nutrition reference
+      </h2>
+      <div className="overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] shadow-sm">
+        <table className="w-full min-w-[320px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-input)]">
+              <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Food</th>
+              <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Calories</th>
+              <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Protein</th>
+              <th className="px-4 py-3 font-semibold text-[var(--color-text)]">Fiber</th>
+              <th className="px-4 py-3 w-12" aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {DEFAULT_NUTRITION_ROWS.map((r, i) => (
+              <NutritionRow key={"def-" + i} food={r.food} calories={r.calories} protein={r.protein} fiber={r.fiber} />
+            ))}
+            {customRows.map((r) => (
+              <NutritionRow
+                key={r.id}
+                food={r.food}
+                calories={r.calories}
+                protein={r.protein}
+                fiber={r.fiber}
+                onDelete={() => removeRow(r.id)}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <NutritionRowAddForm onAdd={addRow} />
+    </section>
+  );
+}
+
+function NutritionRowAddForm({ onAdd }: { onAdd: (row: Omit<NutritionRowData, "id">) => void }) {
+  const [food, setFood] = useState("");
+  const [calories, setCalories] = useState("");
+  const [protein, setProtein] = useState("");
+  const [fiber, setFiber] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const f = food.trim();
+    if (!f) return;
+    onAdd({
+      food: f,
+      calories: calories.trim() || "—",
+      protein: protein.trim() || "—",
+      fiber: fiber.trim() || "—",
+    });
+    setFood("");
+    setCalories("");
+    setProtein("");
+    setFiber("");
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-4 flex flex-wrap items-end gap-3">
+      <input
+        type="text"
+        placeholder="Food (e.g. Paneer 100 g)"
+        value={food}
+        onChange={(e) => setFood(e.target.value)}
+        className="flex-1 min-w-[140px] py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+      <input
+        type="text"
+        placeholder="Calories"
+        value={calories}
+        onChange={(e) => setCalories(e.target.value)}
+        className="w-24 py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+      <input
+        type="text"
+        placeholder="Protein"
+        value={protein}
+        onChange={(e) => setProtein(e.target.value)}
+        className="w-24 py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+      <input
+        type="text"
+        placeholder="Fiber"
+        value={fiber}
+        onChange={(e) => setFiber(e.target.value)}
+        className="w-20 py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+      <button
+        type="submit"
+        className="py-2 px-4 bg-[var(--color-accent)] text-white text-sm font-semibold rounded-lg hover:bg-[var(--color-accent-hover)] transition-colors"
+      >
+        + Add row
+      </button>
+    </form>
+  );
+}
+
 function NutritionRow({
   food,
   calories,
   protein,
   fiber,
+  onDelete,
 }: {
   food: string;
   calories: string;
   protein: string;
   fiber: string;
+  onDelete?: () => void;
 }) {
   return (
     <tr className="border-b border-[var(--color-border)] last:border-b-0 hover:bg-[var(--color-bg-input)]/50">
@@ -307,6 +452,18 @@ function NutritionRow({
       <td className="px-4 py-3 text-[var(--color-text-muted)]">{calories}</td>
       <td className="px-4 py-3 text-[var(--color-accent)] font-medium">{protein}</td>
       <td className="px-4 py-3 text-[var(--color-text-muted)]">{fiber}</td>
+      <td className="px-4 py-3 w-12">
+        {onDelete ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label="Remove row"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-delete-hover)] hover:bg-[var(--color-delete-bg)] rounded p-1 transition-colors"
+          >
+            ×
+          </button>
+        ) : null}
+      </td>
     </tr>
   );
 }
