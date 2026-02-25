@@ -12,6 +12,10 @@ import {
   getProteinData,
   saveProteinData,
   subscribeProteinData,
+  getNutritionRows,
+  saveNutritionRows,
+  subscribeNutritionRows,
+  type NutritionRowData as FirestoreNutritionRowData,
 } from "@/lib/firestore";
 
 function getLevel(total: number): string {
@@ -37,14 +41,7 @@ type GridDay = {
 
 const NUTRITION_CACHE_KEY = "protein200_nutrition_rows";
 
-type NutritionRowData = {
-  id: string;
-  food: string;
-  calories: string;
-  protein: string;
-  fiber: string;
-  refGrams?: number;
-};
+type NutritionRowData = FirestoreNutritionRowData;
 
 /** For calculating intake: refGrams + numeric values per that amount */
 export type FoodReference = { id: string; food: string; refGrams: number; calories: number; protein: number; fiber: number };
@@ -190,7 +187,27 @@ export default function ProteinChallenge() {
   const avgDailyProtein = getAverageDailyProtein(data);
 
   useEffect(() => {
-    setCustomNutritionRows(getStoredNutritionRows());
+    const cached = getStoredNutritionRows();
+    if (cached.length > 0) setCustomNutritionRows(cached);
+
+    let unsubNut: (() => void) | undefined;
+    const loadNutrition = async () => {
+      try {
+        const rows = await getNutritionRows();
+        setCustomNutritionRows(rows);
+        setStoredNutritionRows(rows);
+        unsubNut = subscribeNutritionRows((next) => {
+          setCustomNutritionRows(next);
+          setStoredNutritionRows(next);
+        });
+      } catch (err) {
+        console.error("Failed to load nutrition rows:", err);
+      }
+    };
+    loadNutrition();
+    return () => {
+      unsubNut?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -400,20 +417,26 @@ export default function ProteinChallenge() {
 
       <EditableNutritionTable
         customRows={customNutritionRows}
-        onAddRow={(row) => {
+        onAddRow={async (row) => {
           const newRow: NutritionRowData = { ...row, id: "n-" + Date.now() };
-          setCustomNutritionRows((prev) => {
-            const next = [...prev, newRow];
-            setStoredNutritionRows(next);
-            return next;
-          });
+          const next = [...customNutritionRows, newRow];
+          setCustomNutritionRows(next);
+          setStoredNutritionRows(next);
+          try {
+            await saveNutritionRows(next);
+          } catch (err) {
+            console.error("Failed to save nutrition row:", err);
+          }
         }}
-        onRemoveRow={(id) => {
-          setCustomNutritionRows((prev) => {
-            const next = prev.filter((r) => r.id !== id);
-            setStoredNutritionRows(next);
-            return next;
-          });
+        onRemoveRow={async (id) => {
+          const next = customNutritionRows.filter((r) => r.id !== id);
+          setCustomNutritionRows(next);
+          setStoredNutritionRows(next);
+          try {
+            await saveNutritionRows(next);
+          } catch (err) {
+            console.error("Failed to remove nutrition row:", err);
+          }
         }}
       />
 
