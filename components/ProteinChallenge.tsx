@@ -18,6 +18,11 @@ import {
   type NutritionRowData as FirestoreNutritionRowData,
 } from "@/lib/firestore";
 
+/** Display number with one decimal place (e.g. 24 → "24.0", 23.5 → "23.5") */
+function oneDecimal(n: number): string {
+  return Number.isInteger(n) ? `${n}.0` : n.toFixed(1);
+}
+
 function getLevel(total: number): string {
   if (total >= 80) return "bg-[var(--color-level-80)]";
   if (total >= 70) return "bg-[var(--color-level-70)]";
@@ -295,7 +300,7 @@ export default function ProteinChallenge() {
         <div className="shrink-0 text-right">
           <div className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Daily average</div>
           <div className="text-2xl font-bold text-[var(--color-accent)]">
-            {avgDailyProtein != null ? `${avgDailyProtein}g` : "—"}
+            {avgDailyProtein != null ? `${oneDecimal(avgDailyProtein)}g` : "—"}
           </div>
           <div className="text-xs text-[var(--color-text-muted)]">per day logged</div>
         </div>
@@ -308,17 +313,17 @@ export default function ProteinChallenge() {
           </span>
           <div className="flex flex-wrap items-baseline gap-4">
             <span className="text-2xl font-bold text-[var(--color-accent)]">
-              Total: {todayTotal}
+              Total: {oneDecimal(todayTotal)}
               <span className="text-sm font-normal text-[var(--color-text-muted)]"> g protein</span>
             </span>
             {todayCalories > 0 && (
               <span className="text-sm text-[var(--color-text-muted)]">
-                {todayCalories} kcal
+                {oneDecimal(todayCalories)} kcal
               </span>
             )}
             {todayFiber > 0 && (
               <span className="text-sm text-[var(--color-text-muted)]">
-                {todayFiber}g fiber
+                {oneDecimal(todayFiber)}g fiber
               </span>
             )}
             {saving && (
@@ -338,7 +343,7 @@ export default function ProteinChallenge() {
               className="flex justify-between items-center py-2.5 px-3.5 bg-[var(--color-bg-input)] rounded-lg mb-2 text-[0.95rem] gap-2 flex-wrap"
               title={
                 e.calories != null && e.fiber != null
-                  ? `${e.grams}g protein · ${e.calories} kcal · ${e.fiber}g fiber`
+                  ? `${oneDecimal(e.grams)}g protein · ${oneDecimal(e.calories)} kcal · ${oneDecimal(e.fiber)}g fiber`
                   : undefined
               }
             >
@@ -346,9 +351,9 @@ export default function ProteinChallenge() {
                 {e.note || "—"}
               </span>
               <span className="text-[var(--color-text-muted)] text-[0.85rem]">
-                <span className="text-[var(--color-accent)] font-semibold">{e.grams}g</span> protein
-                {e.calories != null && ` · ${e.calories} kcal`}
-                {e.fiber != null && ` · ${e.fiber}g fiber`}
+                <span className="text-[var(--color-accent)] font-semibold">{oneDecimal(e.grams)}g</span> protein
+                {e.calories != null && ` · ${oneDecimal(e.calories)} kcal`}
+                {e.fiber != null && ` · ${oneDecimal(e.fiber)}g fiber`}
               </span>
               <button
                 type="button"
@@ -387,9 +392,9 @@ export default function ProteinChallenge() {
               onMouseEnter={(e) => {
                 const parts = [`Day ${day.dayNum} · ${day.key}`];
                 if (day.total > 0) {
-                  parts.push(`${day.total}g protein`);
-                  if (day.totalCalories > 0) parts.push(`${day.totalCalories} kcal`);
-                  if (day.totalFiber > 0) parts.push(`${day.totalFiber}g fiber`);
+                  parts.push(`${oneDecimal(day.total)}g protein`);
+                  if (day.totalCalories > 0) parts.push(`${oneDecimal(day.totalCalories)} kcal`);
+                  if (day.totalFiber > 0) parts.push(`${oneDecimal(day.totalFiber)}g fiber`);
                 } else {
                   parts.push("No data");
                 }
@@ -409,7 +414,7 @@ export default function ProteinChallenge() {
                 setTooltip((t) => ({ ...t, visible: false }));
               }}
             >
-              {day.total > 0 && <span>{day.total}g</span>}
+              {day.total > 0 && <span>{oneDecimal(day.total)}g</span>}
             </div>
           ))}
         </div>
