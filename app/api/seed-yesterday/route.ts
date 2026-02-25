@@ -4,10 +4,9 @@ import { getProteinData, saveProteinData } from "@/lib/firestore";
 import type { ProteinEntry } from "@/lib/storage";
 
 const DEFAULT_ENTRIES: ProteinEntry[] = [
-  { grams: 10, note: "palli" },
-  { grams: 34, note: "afternoon" },
-  { grams: 24, note: "evening" },
-  { grams: 12, note: "night" },
+  { grams: 30, note: "afternoon" },
+  { grams: 25, note: "evening" },
+  { grams: 5, note: "night" }, 
 ];
 
 function isValidDate(s: string): boolean {

@@ -1,6 +1,11 @@
 const CACHE_KEY = "protein200challenge_cache";
 
-export type ProteinEntry = { grams: number; note: string };
+export type ProteinEntry = {
+  grams: number;
+  note: string;
+  calories?: number;
+  fiber?: number;
+};
 export type ProteinData = Record<string, ProteinEntry[]>;
 
 export function getCachedProteinData(): ProteinData | null {

@@ -30,12 +30,35 @@ type GridDay = {
   key: string;
   dayNum: number;
   total: number;
+  totalCalories: number;
+  totalFiber: number;
   levelClass: string;
 };
 
 const NUTRITION_CACHE_KEY = "protein200_nutrition_rows";
 
-type NutritionRowData = { id: string; food: string; calories: string; protein: string; fiber: string };
+type NutritionRowData = {
+  id: string;
+  food: string;
+  calories: string;
+  protein: string;
+  fiber: string;
+  refGrams?: number;
+};
+
+/** For calculating intake: refGrams + numeric values per that amount */
+export type FoodReference = { id: string; food: string; refGrams: number; calories: number; protein: number; fiber: number };
+
+const DEFAULT_FOOD_REFERENCE: FoodReference[] = [
+  { id: "chicken", food: "Chicken", refGrams: 150, calories: 250, protein: 46, fiber: 0 },
+  { id: "rice", food: "Rice (cooked)", refGrams: 50, calories: 65, protein: 1.3, fiber: 0.2 },
+  { id: "eggs", food: "Eggs (4)", refGrams: 200, calories: 280, protein: 24, fiber: 0 },
+  { id: "dosa", food: "Dosa", refGrams: 80, calories: 120, protein: 3, fiber: 1 },
+  { id: "roti", food: "Roti (3)", refGrams: 90, calories: 300, protein: 9, fiber: 6 },
+  { id: "groundnuts", food: "Groundnuts", refGrams: 50, calories: 285, protein: 13, fiber: 4 },
+  { id: "soya", food: "Soya Chunks", refGrams: 60, calories: 205, protein: 31.5, fiber: 7.5 },
+  { id: "veg", food: "Vegetables (ridge gourd)", refGrams: 200, calories: 34, protein: 1.6, fiber: 3 },
+];
 
 const DEFAULT_NUTRITION_ROWS: Omit<NutritionRowData, "id">[] = [
   { food: "Chicken (150 g)", calories: "250 kcal", protein: "46 g", fiber: "0 g" },
@@ -47,6 +70,15 @@ const DEFAULT_NUTRITION_ROWS: Omit<NutritionRowData, "id">[] = [
   { food: "Soya Chunks (60 g)", calories: "≈ 205 kcal", protein: "≈ 31–32 g", fiber: "≈ 7–8 g" },
   { food: "Vegetables (ridge gourd 200 g)", calories: "34 kcal", protein: "1.6 g", fiber: "3 g" },
 ];
+
+function computeFromFood(ref: FoodReference, grams: number): { protein: number; calories: number; fiber: number } {
+  const ratio = grams / ref.refGrams;
+  return {
+    protein: Math.round(ref.protein * ratio * 10) / 10,
+    calories: Math.round(ref.calories * ratio),
+    fiber: Math.round(ref.fiber * ratio * 10) / 10,
+  };
+}
 
 function getStoredNutritionRows(): NutritionRowData[] {
   if (typeof window === "undefined") return [];
@@ -69,6 +101,40 @@ function setStoredNutritionRows(rows: NutritionRowData[]) {
   }
 }
 
+/** Parse first number from strings like "250 kcal", "46 g", "≈ 31–32 g" */
+function parseNutrientValue(s: string): number {
+  if (!s || typeof s !== "string") return 0;
+  const cleaned = s.replace(/≈/g, "").trim();
+  const match = cleaned.match(/(\d+\.?\d*)/);
+  if (match) return parseFloat(match[1]);
+  return 0;
+}
+
+/** Convert custom table rows to FoodReference for the top dropdown + calculation */
+function customRowsToFoodReferences(rows: NutritionRowData[]): FoodReference[] {
+  return rows
+    .filter((r) => r.food && (parseNutrientValue(r.protein) > 0 || parseNutrientValue(r.calories) > 0))
+    .map((r) => ({
+      id: r.id,
+      food: r.food.trim(),
+      refGrams: r.refGrams && r.refGrams > 0 ? r.refGrams : 100,
+      calories: parseNutrientValue(r.calories),
+      protein: parseNutrientValue(r.protein),
+      fiber: parseNutrientValue(r.fiber),
+    }));
+}
+
+function getAverageDailyProtein(data: ProteinData): number | null {
+  const dates = Object.keys(data);
+  if (dates.length === 0) return null;
+  let total = 0;
+  for (const key of dates) {
+    const entries = data[key] || [];
+    total += entries.reduce((s, e) => s + (e.grams || 0), 0);
+  }
+  return Math.round(total / dates.length);
+}
+
 function buildGridDays(data: ProteinData): GridDay[] {
   const sortedDates = Object.keys(data).sort();
   const firstDate = sortedDates[0];
@@ -89,10 +155,14 @@ function buildGridDays(data: ProteinData): GridDay[] {
     const key = `${y}-${m}-${day}`;
     const entries = data[key] || [];
     const total = entries.reduce((s, e) => s + (e.grams || 0), 0);
+    const totalCalories = entries.reduce((s, e) => s + (e.calories ?? 0), 0);
+    const totalFiber = entries.reduce((s, e) => s + (e.fiber ?? 0), 0);
     days.push({
       key,
       dayNum: i + 1,
       total,
+      totalCalories,
+      totalFiber,
       levelClass: getLevel(total),
     });
   }
@@ -101,6 +171,7 @@ function buildGridDays(data: ProteinData): GridDay[] {
 
 export default function ProteinChallenge() {
   const [data, setData] = useState<ProteinData>({});
+  const [customNutritionRows, setCustomNutritionRows] = useState<NutritionRowData[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tooltip, setTooltip] = useState<{
@@ -113,7 +184,14 @@ export default function ProteinChallenge() {
   const todayKey = getTodayKey();
   const entries = (data[todayKey] || []) as ProteinEntry[];
   const todayTotal = entries.reduce((sum, e) => sum + (e.grams || 0), 0);
+  const todayCalories = entries.reduce((sum, e) => sum + (e.calories ?? 0), 0);
+  const todayFiber = entries.reduce((sum, e) => sum + (e.fiber ?? 0), 0);
   const gridDays = buildGridDays(data);
+  const avgDailyProtein = getAverageDailyProtein(data);
+
+  useEffect(() => {
+    setCustomNutritionRows(getStoredNutritionRows());
+  }, []);
 
   useEffect(() => {
     const cached = getCachedProteinData();
@@ -152,18 +230,25 @@ export default function ProteinChallenge() {
     }
   }, []);
 
-  const handleAdd = useCallback(
-    (grams: number, note: string) => {
+  const foodOptions = [...DEFAULT_FOOD_REFERENCE, ...customRowsToFoodReferences(customNutritionRows)];
+
+  const handleAddFromTable = useCallback(
+    (foodId: string, foodGrams: number) => {
+      const ref = foodOptions.find((f) => f.id === foodId);
+      if (!ref || foodGrams <= 0) return;
+      const { protein, calories, fiber } = computeFromFood(ref, foodGrams);
       const key = getTodayKey();
       const next = { ...data };
       if (!next[key]) next[key] = [];
       (next[key] as ProteinEntry[]).push({
-        grams,
-        note: note.trim(),
+        grams: protein,
+        note: `${ref.food} ${foodGrams}g`,
+        calories,
+        fiber,
       });
       persistToFirestore(next);
     },
-    [data, persistToFirestore]
+    [data, persistToFirestore, foodOptions]
   );
 
   const handleDelete = useCallback(
@@ -180,49 +265,73 @@ export default function ProteinChallenge() {
 
   return (
     <div className="max-w-[900px] mx-auto px-6 py-8 pb-12">
-      <header className="text-center mb-10">
-        <h1 className="text-[1.85rem] font-bold tracking-tight text-[var(--color-accent)]">
-          200 Day Protein Challenge
-        </h1>
-        <p className="text-[var(--color-text-muted)] text-[0.95rem] mt-1.5">
-          Track your daily protein • Multiple entries per day
-        </p>
-        <div className="mt-4 px-4 py-3 rounded-xl bg-[var(--color-bg-input)] border border-[var(--color-border)] text-left max-w-xl mx-auto">
-          <p className="text-[var(--color-text)] text-sm font-medium">
-            Stay consistent. Protein keeps you full, preserves muscle, and supports weight loss. One day at a time.
+      <div className="flex flex-wrap justify-between items-start gap-4 mb-10">
+        <header className="text-center flex-1 min-w-0">
+          <h1 className="text-[1.85rem] font-bold tracking-tight text-[var(--color-accent)]">
+            200 Day Protein Challenge
+          </h1>
+          <p className="text-[var(--color-text-muted)] text-[0.95rem] mt-1.5">
+            Track your daily protein • Multiple entries per day
           </p>
+
+        </header>
+        <div className="shrink-0 text-right">
+          <div className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Daily average</div>
+          <div className="text-2xl font-bold text-[var(--color-accent)]">
+            {avgDailyProtein != null ? `${avgDailyProtein}g` : "—"}
+          </div>
+          <div className="text-xs text-[var(--color-text-muted)]">per day logged</div>
         </div>
-      </header>
+      </div>
 
       <section className="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-2xl p-6 mb-6 shadow-sm">
         <div className="flex flex-wrap justify-between items-center gap-3 mb-5">
           <span className="font-semibold text-lg text-[var(--color-text)]">
             Today · {todayKey}
           </span>
-          <span className="text-2xl font-bold text-[var(--color-accent)]">
-            Total: {todayTotal}
-            <span className="text-sm font-normal text-[var(--color-text-muted)]">
-              g protein
+          <div className="flex flex-wrap items-baseline gap-4">
+            <span className="text-2xl font-bold text-[var(--color-accent)]">
+              Total: {todayTotal}
+              <span className="text-sm font-normal text-[var(--color-text-muted)]"> g protein</span>
             </span>
-            {saving && (
-              <span className="ml-2 text-sm font-normal text-[var(--color-text-muted)]">
-                Saving…
+            {todayCalories > 0 && (
+              <span className="text-sm text-[var(--color-text-muted)]">
+                {todayCalories} kcal
               </span>
             )}
-          </span>
+            {todayFiber > 0 && (
+              <span className="text-sm text-[var(--color-text-muted)]">
+                {todayFiber}g fiber
+              </span>
+            )}
+            {saving && (
+              <span className="text-sm text-[var(--color-text-muted)]">Saving…</span>
+            )}
+          </div>
         </div>
-        <AddForm onAdd={handleAdd} disabled={saving} />
+        <AddForm
+          onAddFromTable={handleAddFromTable}
+          foodOptions={foodOptions}
+          disabled={saving}
+        />
         <ul className="list-none">
           {entries.map((e, i) => (
             <li
               key={i}
-              className="flex justify-between items-center py-2.5 px-3.5 bg-[var(--color-bg-input)] rounded-lg mb-2 text-[0.95rem]"
+              className="flex justify-between items-center py-2.5 px-3.5 bg-[var(--color-bg-input)] rounded-lg mb-2 text-[0.95rem] gap-2 flex-wrap"
+              title={
+                e.calories != null && e.fiber != null
+                  ? `${e.grams}g protein · ${e.calories} kcal · ${e.fiber}g fiber`
+                  : undefined
+              }
             >
-              <span className="font-semibold text-[var(--color-accent)]">
-                {e.grams}g
+              <span className="font-medium text-[var(--color-text)]">
+                {e.note || "—"}
               </span>
               <span className="text-[var(--color-text-muted)] text-[0.85rem]">
-                {e.note || "—"}
+                <span className="text-[var(--color-accent)] font-semibold">{e.grams}g</span> protein
+                {e.calories != null && ` · ${e.calories} kcal`}
+                {e.fiber != null && ` · ${e.fiber}g fiber`}
               </span>
               <button
                 type="button"
@@ -259,8 +368,16 @@ export default function ProteinChallenge() {
               key={day.key}
               className={`aspect-square rounded-md border border-[var(--color-border)] cursor-pointer transition-all hover:scale-[1.08] hover:shadow-lg hover:z-10 flex items-center justify-center min-w-0 text-[0.55rem] font-semibold ${day.total > 0 ? day.levelClass + " text-white" : "bg-[var(--color-empty)] hover:bg-[var(--color-empty-hover)] text-transparent"}`}
               onMouseEnter={(e) => {
+                const parts = [`Day ${day.dayNum} · ${day.key}`];
+                if (day.total > 0) {
+                  parts.push(`${day.total}g protein`);
+                  if (day.totalCalories > 0) parts.push(`${day.totalCalories} kcal`);
+                  if (day.totalFiber > 0) parts.push(`${day.totalFiber}g fiber`);
+                } else {
+                  parts.push("No data");
+                }
                 setTooltip({
-                  text: `Day ${day.dayNum} · ${day.key}${day.total ? ` · ${day.total}g` : " · No data"}`,
+                  text: parts.join(" · "),
                   x: e.pageX + 10,
                   y: e.pageY + 10,
                   visible: true,
@@ -281,7 +398,24 @@ export default function ProteinChallenge() {
         </div>
       </section>
 
-      <EditableNutritionTable />
+      <EditableNutritionTable
+        customRows={customNutritionRows}
+        onAddRow={(row) => {
+          const newRow: NutritionRowData = { ...row, id: "n-" + Date.now() };
+          setCustomNutritionRows((prev) => {
+            const next = [...prev, newRow];
+            setStoredNutritionRows(next);
+            return next;
+          });
+        }}
+        onRemoveRow={(id) => {
+          setCustomNutritionRows((prev) => {
+            const next = prev.filter((r) => r.id !== id);
+            setStoredNutritionRows(next);
+            return next;
+          });
+        }}
+      />
 
       <div
         className="fixed pointer-events-none z-[100] rounded-lg px-3 py-2 text-sm bg-[var(--color-bg-card)] border border-[var(--color-border)] shadow-xl transition-opacity"
@@ -306,33 +440,15 @@ function LegendItem({ color, label }: { color: string; label: string }) {
   );
 }
 
-function EditableNutritionTable() {
-  const [customRows, setCustomRows] = useState<NutritionRowData[]>([]);
-
-  useEffect(() => {
-    setCustomRows(getStoredNutritionRows());
-  }, []);
-
-  const addRow = useCallback((row: Omit<NutritionRowData, "id">) => {
-    const newRow: NutritionRowData = {
-      ...row,
-      id: "n-" + Date.now(),
-    };
-    setCustomRows((prev) => {
-      const next = [...prev, newRow];
-      setStoredNutritionRows(next);
-      return next;
-    });
-  }, []);
-
-  const removeRow = useCallback((id: string) => {
-    setCustomRows((prev) => {
-      const next = prev.filter((r) => r.id !== id);
-      setStoredNutritionRows(next);
-      return next;
-    });
-  }, []);
-
+function EditableNutritionTable({
+  customRows,
+  onAddRow,
+  onRemoveRow,
+}: {
+  customRows: NutritionRowData[];
+  onAddRow: (row: Omit<NutritionRowData, "id">) => void;
+  onRemoveRow: (id: string) => void;
+}) {
   return (
     <section className="mt-10">
       <h2 className="text-lg font-semibold mb-4 text-[var(--color-text)]">
@@ -360,19 +476,20 @@ function EditableNutritionTable() {
                 calories={r.calories}
                 protein={r.protein}
                 fiber={r.fiber}
-                onDelete={() => removeRow(r.id)}
+                onDelete={() => onRemoveRow(r.id)}
               />
             ))}
           </tbody>
         </table>
       </div>
-      <NutritionRowAddForm onAdd={addRow} />
+      <NutritionRowAddForm onAdd={onAddRow} />
     </section>
   );
 }
 
 function NutritionRowAddForm({ onAdd }: { onAdd: (row: Omit<NutritionRowData, "id">) => void }) {
   const [food, setFood] = useState("");
+  const [refGrams, setRefGrams] = useState("100");
   const [calories, setCalories] = useState("");
   const [protein, setProtein] = useState("");
   const [fiber, setFiber] = useState("");
@@ -381,13 +498,16 @@ function NutritionRowAddForm({ onAdd }: { onAdd: (row: Omit<NutritionRowData, "i
     e.preventDefault();
     const f = food.trim();
     if (!f) return;
+    const ref = refGrams.trim() ? parseFloat(refGrams.replace(",", ".")) : 100;
     onAdd({
       food: f,
+      refGrams: ref > 0 ? ref : 100,
       calories: calories.trim() || "—",
       protein: protein.trim() || "—",
       fiber: fiber.trim() || "—",
     });
     setFood("");
+    setRefGrams("100");
     setCalories("");
     setProtein("");
     setFiber("");
@@ -397,10 +517,20 @@ function NutritionRowAddForm({ onAdd }: { onAdd: (row: Omit<NutritionRowData, "i
     <form onSubmit={handleSubmit} className="mt-4 flex flex-wrap items-end gap-3">
       <input
         type="text"
-        placeholder="Food (e.g. Paneer 100 g)"
+        placeholder="Food (e.g. Paneer)"
         value={food}
         onChange={(e) => setFood(e.target.value)}
-        className="flex-1 min-w-[140px] py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+        className="flex-1 min-w-[120px] py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+      <input
+        type="number"
+        placeholder="Ref (g)"
+        title="Reference grams: calories/protein/fiber below are for this amount"
+        min={1}
+        step={1}
+        value={refGrams}
+        onChange={(e) => setRefGrams(e.target.value)}
+        className="w-16 py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
       />
       <input
         type="text"
@@ -411,14 +541,14 @@ function NutritionRowAddForm({ onAdd }: { onAdd: (row: Omit<NutritionRowData, "i
       />
       <input
         type="text"
-        placeholder="Protein"
+        placeholder="Protein (g)"
         value={protein}
         onChange={(e) => setProtein(e.target.value)}
         className="w-24 py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
       />
       <input
         type="text"
-        placeholder="Fiber"
+        placeholder="Fiber (g)"
         value={fiber}
         onChange={(e) => setFiber(e.target.value)}
         className="w-20 py-2 px-3 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
@@ -429,6 +559,9 @@ function NutritionRowAddForm({ onAdd }: { onAdd: (row: Omit<NutritionRowData, "i
       >
         + Add row
       </button>
+      <p className="w-full text-[var(--color-text-muted)] text-xs mt-1">
+        New foods appear in the &quot;Select food&quot; dropdown above for logging intake.
+      </p>
     </form>
   );
 }
@@ -469,49 +602,64 @@ function NutritionRow({
 }
 
 function AddForm({
-  onAdd,
+  onAddFromTable,
+  foodOptions,
   disabled,
 }: {
-  onAdd: (grams: number, note: string) => void;
+  onAddFromTable: (foodId: string, foodGrams: number) => void;
+  foodOptions: FoodReference[];
   disabled?: boolean;
 }) {
-  const [grams, setGrams] = useState("");
-  const [note, setNote] = useState("");
+  const [foodId, setFoodId] = useState("");
+  const [foodGrams, setFoodGrams] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const g = parseInt(grams, 10);
-    if (!g || g < 1) return;
-    onAdd(g, note);
-    setGrams("");
-    setNote("");
+    if (!foodId) return;
+    const g = parseFloat(String(foodGrams).replace(",", "."));
+    if (!g || g <= 0) return;
+    onAddFromTable(foodId, g);
+    setFoodGrams("");
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-3 flex-wrap mb-4">
+    <form onSubmit={handleSubmit} className="flex gap-3 flex-wrap items-end mb-4">
+      <label className="sr-only" htmlFor="food-select">Food</label>
+      <select
+        id="food-select"
+        value={foodId}
+        onChange={(e) => setFoodId(e.target.value)}
+        required
+        className="py-2.5 px-3.5 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-[10px] text-[var(--color-text)] text-[0.95rem] font-[inherit] focus:outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-ring)] min-w-[180px]"
+      >
+        <option value="">Select food</option>
+        {foodOptions.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.food} (ref: {f.refGrams}g)
+          </option>
+        ))}
+      </select>
+      <label className="sr-only" htmlFor="food-grams">Amount eaten (g)</label>
       <input
+        id="food-grams"
         type="number"
-        placeholder="grams"
-        min={1}
-        max={500}
-        value={grams}
-        onChange={(e) => setGrams(e.target.value)}
-        className="w-[100px] py-2.5 px-3.5 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-[10px] text-[var(--color-text)] text-[0.95rem] font-[inherit] focus:outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-ring)]"
-      />
-      <input
-        type="text"
-        placeholder="e.g. Breakfast, Shake, Dinner"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        className="flex-1 min-w-[120px] py-2.5 px-3.5 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-[10px] text-[var(--color-text)] font-[inherit] text-[0.95rem] placeholder:text-[var(--color-text-muted)]"
+        placeholder="Amount eaten (g)"
+        min={0.1}
+        step={0.1}
+        value={foodGrams}
+        onChange={(e) => setFoodGrams(e.target.value)}
+        className="w-32 py-2.5 px-3.5 bg-[var(--color-bg-input)] border border-[var(--color-border)] rounded-[10px] text-[var(--color-text)] text-[0.95rem] font-[inherit] focus:outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent-ring)]"
       />
       <button
         type="submit"
-        disabled={disabled}
+        disabled={disabled || !foodId}
         className="py-2.5 px-5 bg-[var(--color-accent)] border-none rounded-[10px] text-white font-semibold cursor-pointer transition-all hover:bg-[var(--color-accent-hover)] hover:-translate-y-0.5 hover:shadow-[0_4px_14px_var(--color-accent-shadow)] active:translate-y-0 disabled:opacity-50"
       >
         + Add
       </button>
+      <p className="w-full text-[var(--color-text-muted)] text-xs mt-1">
+        Protein, calories and fiber are calculated from the amount you enter.
+      </p>
     </form>
   );
 }
